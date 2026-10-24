@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './db';
 
-export function useDebtData() {
+// Hàm nhận tham số flexible để khớp 100% với page.tsx
+export function useDebtData(tables?: any) {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [contracts, setContracts] = useState<any[]>([]);
@@ -21,7 +22,6 @@ export function useDebtData() {
       if (invError) throw invError;
       setInvoices(invData || []);
 
-      // Lấy thêm thông tin công ty và hợp đồng nếu có bảng tương ứng
       const { data: compData } = await supabase.from('companies').select('*');
       setCompanies(compData || []);
 
@@ -46,3 +46,5 @@ export function useDebtData() {
     refresh: fetchAllData 
   };
 }
+
+export default useDebtData;
