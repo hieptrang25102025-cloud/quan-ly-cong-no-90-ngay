@@ -4,14 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
-import {
-  INITIAL_COMPANIES,
-  INITIAL_CONTRACTS,
-  INITIAL_INVOICES,
-  INITIAL_PAYMENTS,
-  INITIAL_CONTACTS,
-  INITIAL_PROMISES,
-} from "@/lib/data-store";
+import { useDebtData } from "@/lib/use-debt-data";
 import {
   formatVNCurrency,
   formatVNDate,
@@ -34,13 +27,14 @@ import {
 } from "lucide-react";
 
 export default function DashboardPage() {
-  const [invoices, setInvoices] = useState(INITIAL_INVOICES);
-  const [companies] = useState(INITIAL_COMPANIES);
-  const [promises] = useState(INITIAL_PROMISES);
-  const [contacts] = useState(INITIAL_CONTACTS);
+  const { invoices, companies, promises, contacts, reload } = useDebtData([
+    "invoices",
+    "companies",
+    "promises",
+    "contacts",
+  ]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState<string>("all");
-
   // Đánh giá thông báo tự động tại thời điểm hiện tại
   const generatedNotifications = useMemo(() => {
     return evaluateNotifications(invoices, promises, new Date());
@@ -160,11 +154,10 @@ export default function DashboardPage() {
     return invoices;
   }, [invoices, selectedFilter, contacts]);
 
-  const handleRefresh = () => {
+    const handleRefresh = async () => {
     setIsRefreshing(true);
-    setTimeout(() => {
-      setIsRefreshing(false);
-    }, 600);
+    await reload();
+    setIsRefreshing(false);
   };
 
   return (
