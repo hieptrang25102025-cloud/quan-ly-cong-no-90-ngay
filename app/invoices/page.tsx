@@ -3,22 +3,14 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
-import {
-  INITIAL_COMPANIES,
-  INITIAL_CONTRACTS,
-  INITIAL_INVOICES,
-  INITIAL_PAYMENTS,
-} from "@/lib/data-store";
+import { DbStatus } from "@/components/DbStatus";
+import { PdfFileField } from "@/components/PdfFileField";
+import { InvoiceCompareModal } from "@/components/InvoiceCompareModal";
+import { useDebtData } from "@/lib/use-debt-data";
+import { createInvoice, updateInvoice, deleteInvoice, errorMessage } from "@/lib/db";
 import { Invoice, DebtStatus } from "@/types/debt";
-import {
-  formatVNCurrency,
-  formatVNDate,
-  calculateDueDate,
-  calculateDaysOverdue,
-  calculateDaysRemaining,
-  calculateEstimatedPenalty,
-  determineDebtStatus,
-} from "@/lib/debt-engine";
+import { formatVNCurrency, formatVNDate } from "@/lib/debt-engine";
+import { uploadInvoiceFile, removeInvoiceFiles, openInvoiceFile } from "@/lib/storage";
 import {
   Receipt,
   Plus,
@@ -32,13 +24,15 @@ import {
   ChevronRight,
   Info,
   Edit,
+  Trash2,
   ExternalLink,
+  FileText,
+  Paperclip,
 } from "lucide-react";
 
 export default function InvoicesPage() {
-  const [invoices, setInvoices] = useState<Invoice[]>(INITIAL_INVOICES);
-  const [companies] = useState(INITIAL_COMPANIES);
-  const [contracts] = useState(INITIAL_CONTRACTS);
+  const { invoices, companies, contracts, loading, errors, reload } = useDebtData(["invoices", "companies", "contracts"]);
+  const [isSaving, setIsSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
@@ -61,6 +55,9 @@ export default function InvoicesPage() {
   const [confirmedStartDate, setConfirmedStartDate] = useState("2026-10-21");
   const [totalAmount, setTotalAmount] = useState<number>(5500000);
   const [notes, setNotes] = useState("");
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [acceptanceFile, setAcceptanceFile] = useState<File | null>(null);
+  const [compareInvoiceId, setCompareInvoiceId] = useState<string | null>(null);
 
   // Form Gia Hạn
   const [extendedDueDate, setExtendedDueDate] = useState("");
@@ -78,8 +75,9 @@ export default function InvoicesPage() {
   });
 
   const openAddModal = () => {
-    setCompanyId(companies[0]?.id || "");
-    setContractId(contracts[0]?.id || "");
+    const firstCompanyId = companies[0]?.id || "";
+    setCompanyId(firstCompanyId);
+    setContractId(contracts.find((k) => k.company_id === firstCompanyId)?.id || "");
     setInvoiceNumber("");
     setInvoiceSerial("2C26MAA");
     setInvoiceDate(new Date().toISOString().split("T")[0]);
@@ -90,51 +88,62 @@ export default function InvoicesPage() {
     setConfirmedStartDate(new Date().toISOString().split("T")[0]);
     setTotalAmount(0);
     setNotes("");
+    setInvoiceFile(null);
+    setAcceptanceFile(null);
     setIsAddModalOpen(true);
   };
 
-  const handleCreateInvoice = (e: React.FormEvent) => {
+  const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!invoiceNumber || totalAmount <= 0) {
+    if (!companyId) {
+      alert("Chưa có công ty nào. Hãy thêm công ty khách hàng trước khi nhập hóa đơn!");
+      return;
+    }
+    if (!invoiceNumber.trim() || totalAmount <= 0) {
       alert("Vui lòng điền số hóa đơn và tổng số tiền hợp lệ!");
       return;
     }
 
-    const comp = companies.find((c) => c.id === companyId);
-    const con = contracts.find((c) => c.id === contractId);
+    setIsSaving(true);
+    const uploaded: string[] = [];
+    try {
+      // Tải file PDF lên Storage trước; nếu lưu hóa đơn thất bại thì dọn lại file vừa tải
+      let invoiceFilePath = "";
+      let acceptanceFilePath = "";
+      if (invoiceFile) {
+        invoiceFilePath = await uploadInvoiceFile(invoiceFile, "invoice", companyId);
+        uploaded.push(invoiceFilePath);
+      }
+      if (acceptanceFile) {
+        acceptanceFilePath = await uploadInvoiceFile(acceptanceFile, "acceptance", companyId);
+        uploaded.push(acceptanceFilePath);
+      }
 
-    // Tính hạn 90 ngày nếu có ngày bắt đầu
-    const calculatedDue = confirmedStartDate ? calculateDueDate(confirmedStartDate, 90) : "";
-
-    const newInv: Invoice = {
-      id: `inv-${Date.now()}`,
-      company_id: companyId,
-      company_name: comp?.name || "",
-      contract_id: contractId,
-      contract_number: con?.contract_number || "",
-      invoice_number: invoiceNumber,
-      invoice_serial: invoiceSerial,
-      invoice_date: invoiceDate,
-      acceptance_date: acceptanceDate,
-      sent_invoice_date: sentInvoiceDate,
-      sent_acceptance_date: sentAcceptanceDate,
-      confirmed_receipt_date: confirmedReceiptDate,
-      confirmed_start_date: confirmedStartDate,
-      due_date: calculatedDue,
-      total_amount: Number(totalAmount),
-      paid_amount: 0,
-      remaining_balance: Number(totalAmount),
-      estimated_penalty: 0,
-      days_overdue: 0,
-      status: confirmedStartDate ? "not_due_yet" : "incomplete_dossier",
-      notes,
-      is_paused: false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    setInvoices((prev) => [newInv, ...prev]);
-    setIsAddModalOpen(false);
+      // Hạn 90 ngày, số dư, trạng thái được tính trong createInvoice (lib/db.ts)
+      await createInvoice({
+        company_id: companyId,
+        contract_id: contractId,
+        invoice_number: invoiceNumber,
+        invoice_serial: invoiceSerial,
+        invoice_date: invoiceDate,
+        acceptance_date: acceptanceDate,
+        sent_invoice_date: sentInvoiceDate,
+        sent_acceptance_date: sentAcceptanceDate,
+        confirmed_receipt_date: confirmedReceiptDate,
+        confirmed_start_date: confirmedStartDate,
+        total_amount: Number(totalAmount),
+        invoice_file_url: invoiceFilePath,
+        acceptance_file_url: acceptanceFilePath,
+        notes,
+      });
+      await reload();
+      setIsAddModalOpen(false);
+    } catch (err) {
+      await removeInvoiceFiles(uploaded);
+      alert("Không lưu được hóa đơn: " + errorMessage(err));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleOpenExtension = (inv: Invoice) => {
@@ -144,34 +153,26 @@ export default function InvoicesPage() {
     setIsExtensionModalOpen(true);
   };
 
-  const handleSaveExtension = (e: React.FormEvent) => {
+  const handleSaveExtension = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoice || !extendedDueDate) return;
 
-    setInvoices((prev) =>
-      prev.map((i) =>
-        i.id === selectedInvoice.id
-          ? {
-              ...i,
-              extended_due_date: extendedDueDate,
-              extension_reason: extensionReason,
-              status: "extended",
-              days_overdue: calculateDaysOverdue(extendedDueDate),
-              estimated_penalty: calculateEstimatedPenalty(
-                i.remaining_balance,
-                0.001,
-                calculateDaysOverdue(extendedDueDate)
-              ),
-              updated_at: new Date().toISOString(),
-            }
-          : i
-      )
-    );
-
-    setIsExtensionModalOpen(false);
+    setIsSaving(true);
+    try {
+      await updateInvoice(selectedInvoice, {
+        extended_due_date: extendedDueDate,
+        extension_reason: extensionReason,
+      });
+      await reload();
+      setIsExtensionModalOpen(false);
+    } catch (err) {
+      alert("Không lưu được gia hạn: " + errorMessage(err));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleTogglePause = (inv: Invoice) => {
+  const handleTogglePause = async (inv: Invoice) => {
     const nextPaused = !inv.is_paused;
     const reason = nextPaused
       ? prompt("Nhập lý do tạm dừng đôn đốc công nợ (ví dụ: Đang đối chiếu linh kiện, chờ giám đốc duyệt):")
@@ -179,19 +180,23 @@ export default function InvoicesPage() {
 
     if (nextPaused && !reason) return;
 
-    setInvoices((prev) =>
-      prev.map((i) =>
-        i.id === inv.id
-          ? {
-              ...i,
-              is_paused: nextPaused,
-              pause_reason: reason || undefined,
-              status: nextPaused ? "paused" : determineDebtStatus(i),
-              updated_at: new Date().toISOString(),
-            }
-          : i
-      )
-    );
+    try {
+      await updateInvoice(inv, { is_paused: nextPaused, pause_reason: reason || "" });
+      await reload();
+    } catch (err) {
+      alert("Không cập nhật được trạng thái tạm dừng: " + errorMessage(err));
+    }
+  };
+
+  const handleDeleteInvoice = async (inv: Invoice) => {
+    if (!confirm(`Xóa hóa đơn số ${inv.invoice_number} của ${inv.company_name || "khách hàng"}?\nThao tác này không thể hoàn tác.`)) return;
+    try {
+      await deleteInvoice(inv.id);
+      await removeInvoiceFiles([inv.invoice_file_url, inv.acceptance_file_url]);
+      await reload();
+    } catch (err) {
+      alert("Không xóa được hóa đơn: " + errorMessage(err));
+    }
   };
 
   return (
@@ -202,6 +207,7 @@ export default function InvoicesPage() {
         <Header title="Quản lý hóa đơn & theo dõi công nợ 90 ngày" />
 
         <main className="p-6 space-y-6 overflow-y-auto">
+          <DbStatus loading={loading} errors={errors} onRetry={reload} />
           {/* Header Bar */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
             <div className="flex flex-1 items-center gap-3 max-w-xl">
@@ -302,6 +308,29 @@ export default function InvoicesPage() {
                                 <span className="text-[10px] text-slate-400">Cần xác minh với Bên B</span>
                               </div>
                             )}
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                              {inv.invoice_file_url ? (
+                                <button
+                                  onClick={() => openInvoiceFile(inv.invoice_file_url!).catch((e) => alert(errorMessage(e)))}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 text-[10px] font-semibold"
+                                  title="Mở file PDF hóa đơn"
+                                >
+                                  <FileText className="w-3 h-3" /> HĐ
+                                </button>
+                              ) : null}
+                              {inv.acceptance_file_url ? (
+                                <button
+                                  onClick={() => openInvoiceFile(inv.acceptance_file_url!).catch((e) => alert(errorMessage(e)))}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 text-[10px] font-semibold"
+                                  title="Mở file PDF biên bản nghiệm thu"
+                                >
+                                  <FileText className="w-3 h-3" /> BBNT
+                                </button>
+                              ) : null}
+                              {!inv.invoice_file_url && !inv.acceptance_file_url && (
+                                <span className="text-[10px] text-slate-400 italic">Chưa đính kèm file</span>
+                              )}
+                            </div>
                           </td>
 
                           <td className="px-4 py-3">
@@ -368,6 +397,13 @@ export default function InvoicesPage() {
                           <td className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-1">
                               <button
+                                onClick={() => setCompareInvoiceId(inv.id)}
+                                className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-[11px] font-semibold"
+                                title="Xem file PDF và đối chiếu với số liệu"
+                              >
+                                <Paperclip className="w-3 h-3" /> Đối chiếu
+                              </button>
+                              <button
                                 onClick={() => {
                                   setSelectedInvoice(inv);
                                   setIsDetailModalOpen(true);
@@ -394,6 +430,13 @@ export default function InvoicesPage() {
                                 title={inv.is_paused ? "Tiếp tục đôn đốc" : "Tạm dừng nhắc nợ"}
                               >
                                 {inv.is_paused ? "Đang dừng" : "Dừng"}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteInvoice(inv)}
+                                className="px-1.5 py-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50"
+                                title="Xóa hóa đơn"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           </td>
@@ -428,7 +471,10 @@ export default function InvoicesPage() {
                       </label>
                       <select
                         value={companyId}
-                        onChange={(e) => setCompanyId(e.target.value)}
+                        onChange={(e) => {
+                          setCompanyId(e.target.value);
+                          setContractId(contracts.find((k) => k.company_id === e.target.value)?.id || "");
+                        }}
                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                       >
                         {companies.map((c) => (
@@ -447,7 +493,9 @@ export default function InvoicesPage() {
                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                       >
                         <option value="">-- Không chọn / Thỏa thuận đơn lẻ --</option>
-                        {contracts.map((k) => (
+                        {contracts
+                          .filter((k) => k.company_id === companyId)
+                          .map((k) => (
                           <option key={k.id} value={k.id}>
                             {k.contract_number} ({k.contract_name})
                           </option>
@@ -556,13 +604,37 @@ export default function InvoicesPage() {
                     </p>
                   </div>
 
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Paperclip className="w-4 h-4 text-blue-600" />
+                      <span className="font-bold text-slate-800">Đính kèm hồ sơ (PDF)</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <PdfFileField
+                        label="File hóa đơn điện tử"
+                        hint="PDF, tối đa 10 MB"
+                        file={invoiceFile}
+                        onChange={setInvoiceFile}
+                      />
+                      <PdfFileField
+                        label="File biên bản nghiệm thu"
+                        hint="PDF, tối đa 10 MB"
+                        file={acceptanceFile}
+                        onChange={setAcceptanceFile}
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Có thể bỏ qua và bổ sung sau: bấm “Đối chiếu” ở dòng hóa đơn để đính kèm, xem hoặc thay file bất cứ lúc nào.
+                    </p>
+                  </div>
+
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">
-                      Nội dung hàng hóa / Dịch vụ sửa chữa / Ghi chú
+                      Ghi chú ngắn <span className="font-normal text-slate-400">(không bắt buộc)</span>
                     </label>
-                    <textarea
-                      rows={2}
-                      placeholder="Ví dụ: Sửa chữa xe 51D-09944: Cuộn hút van điện từ, bóng đèn valy, công thợ..."
+                    <input
+                      type="text"
+                      placeholder="Ví dụ: Sửa chữa xe 51D-09944"
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
                       className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
@@ -579,14 +651,24 @@ export default function InvoicesPage() {
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700"
+                      disabled={isSaving}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-60"
                     >
-                      Lưu hóa đơn & tính hạn 90 ngày
+                      {isSaving ? "Đang lưu..." : "Lưu hóa đơn & tính hạn 90 ngày"}
                     </button>
                   </div>
                 </form>
               </div>
             </div>
+          )}
+
+          {/* Modal Đối chiếu hồ sơ (xem PDF hóa đơn / biên bản nghiệm thu) */}
+          {compareInvoiceId && invoices.find((i) => i.id === compareInvoiceId) && (
+            <InvoiceCompareModal
+              invoice={invoices.find((i) => i.id === compareInvoiceId)!}
+              onClose={() => setCompareInvoiceId(null)}
+              onChanged={reload}
+            />
           )}
 
           {/* Modal Xem Chi Tiết Cách Tính Phạt */}
@@ -726,9 +808,10 @@ export default function InvoicesPage() {
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-2 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700"
+                      disabled={isSaving}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 disabled:opacity-60"
                     >
-                      Xác nhận gia hạn
+                      {isSaving ? "Đang lưu..." : "Xác nhận gia hạn"}
                     </button>
                   </div>
                 </form>
