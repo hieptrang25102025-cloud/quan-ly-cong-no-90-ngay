@@ -74,7 +74,7 @@ export function InvoiceCompareModal({ invoice, onClose, onChanged }: Props) {
     try {
       newPath = await uploadInvoiceFile(file, kind, invoice.company_id);
       await updateInvoice(
-      invoice.id,
+     invoice,
         kind === "invoice" ? { invoice_file_url: newPath } : { acceptance_file_url: newPath }
       );
       await removeInvoiceFiles([oldPath]); // dọn file cũ sau khi đã lưu thành công
@@ -93,7 +93,7 @@ export function InvoiceCompareModal({ invoice, onClose, onChanged }: Props) {
     if (!confirm(`Gỡ file "${FILE_KIND_LABEL[kind]}" khỏi hóa đơn số ${invoice.invoice_number}?`)) return;
     setBusy(kind);
     try {
-      await updateInvoice(invoice.id, kind === "invoice" ? { invoice_file_url: "" } : { acceptance_file_url: "" });
+      await updateInvoice(invoice, kind === "invoice" ? { invoice_file_url: "" } : { acceptance_file_url: "" });
       await removeInvoiceFiles([oldPath]);
       await onChanged();
     } catch (err) {

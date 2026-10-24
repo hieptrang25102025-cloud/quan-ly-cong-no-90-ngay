@@ -159,7 +159,7 @@ export default function InvoicesPage() {
 
     setIsSaving(true);
     try {
-      await updateInvoice(selectedInvoice.id, {
+      await updateInvoice(selectedInvoice, {
         extended_due_date: extendedDueDate,
         extension_reason: extensionReason,
       });
@@ -181,7 +181,7 @@ export default function InvoicesPage() {
     if (nextPaused && !reason) return;
 
     try {
-      await updateInvoice(inv.id, { is_paused: nextPaused, pause_reason: reason || "" });
+      await updateInvoice(inv, { is_paused: nextPaused, pause_reason: reason || "" });
       await reload();
     } catch (err) {
       alert("Không cập nhật được trạng thái tạm dừng: " + errorMessage(err));

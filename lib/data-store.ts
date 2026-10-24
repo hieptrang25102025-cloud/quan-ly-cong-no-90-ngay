@@ -73,3 +73,6 @@ export const INITIAL_SETTINGS: AppSettings = {
   reminder_days_overdue: [1, 7, 15, 30, 60, 90],
   recurring_overdue_interval_days: 7,
 };
+
+
+export const DEFAULT_SETTINGS = INITIAL_SETTINGS;

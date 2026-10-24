@@ -1,49 +1,93 @@
-import { useState, useEffect } from 'react';
-import { supabase } from './db';
+import { useCallback, useEffect, useState } from "react";
+import { supabase, errorMessage } from "./db";
+import {
+  SELECT_COMPANIES,
+  SELECT_CONTRACTS,
+  SELECT_INVOICES,
+  SELECT_PAYMENTS,
+  SELECT_CONTACTS,
+  SELECT_PROMISES,
+  SELECT_SETTINGS,
+  toCompany,
+  toContract,
+  toFreshInvoice,
+  toPayment,
+  toContact,
+  toPromise,
+  toSettings,
+} from "./db-mappers";
+import {
+  AppSettings,
+  Company,
+  ContactHistory,
+  Contract,
+  Invoice,
+  Payment,
+  PaymentPromise,
+} from "@/types/debt";
 
-// Hàm nhận tham số flexible để khớp 100% với page.tsx
-export function useDebtData(tables?: any) {
-  const [invoices, setInvoices] = useState<any[]>([]);
-  const [companies, setCompanies] = useState<any[]>([]);
-  const [contracts, setContracts] = useState<any[]>([]);
+const ALL = ["invoices", "companies", "contracts", "payments", "contacts", "promises", "settings"];
+
+export function useDebtData(tables?: string[]) {
+  const wanted = tables && tables.length ? tables : ALL;
+  const key = wanted.join(",");
+
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [contacts, setContacts] = useState<ContactHistory[]>([]);
+  const [promises, setPromises] = useState<PaymentPromise[]>([]);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchAllData();
-  }, []);
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const want = (t: string) => key.split(",").includes(t);
+    const problems: string[] = [];
 
-  async function fetchAllData() {
+    const run = async (name: string, table: string, select: string, apply: (rows: any[]) => void) => {
+      if (!want(name)) return;
+      const { data, error } = await supabase.from(table).select(select);
+      if (error) problems.push(`${name}: ${errorMessage(error)}`);
+      else apply(data || []);
+    };
+
     try {
-      setLoading(true);
-      setErrors(null);
-      
-      const { data: invData, error: invError } = await supabase.from('invoices').select('*');
-      if (invError) throw invError;
-      setInvoices(invData || []);
-
-      const { data: compData } = await supabase.from('companies').select('*');
-      setCompanies(compData || []);
-
-      const { data: contractData } = await supabase.from('contracts').select('*');
-      setContracts(contractData || []);
-
-    } catch (err: any) {
-      console.error('Lỗi tải dữ liệu:', err);
-      setErrors(err?.message || 'Đã có lỗi xảy ra');
-    } finally {
-      setLoading(false);
+      await Promise.all([
+        run("companies", "companies", SELECT_COMPANIES, (r) => setCompanies(r.map(toCompany))),
+        run("contracts", "contracts", SELECT_CONTRACTS, (r) => setContracts(r.map(toContract))),
+        run("invoices", "invoices", SELECT_INVOICES, (r) => setInvoices(r.map((x) => toFreshInvoice(x)))),
+        run("payments", "payments", SELECT_PAYMENTS, (r) => setPayments(r.map(toPayment))),
+        run("contacts", "contact_history", SELECT_CONTACTS, (r) => setContacts(r.map(toContact))),
+        run("promises", "payment_promises", SELECT_PROMISES, (r) => setPromises(r.map(toPromise))),
+        run("settings", "app_settings", SELECT_SETTINGS, (r) => setSettings(r[0] ? toSettings(r[0]) : null)),
+      ]);
+    } catch (err) {
+      problems.push(errorMessage(err));
     }
-  }
 
-  return { 
-    invoices, 
-    companies, 
-    contracts, 
-    loading, 
-    errors, 
-    reload: fetchAllData,
-    refresh: fetchAllData 
+    setErrors(problems.length ? problems.join(" | ") : null);
+    setLoading(false);
+  }, [key]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return {
+    invoices,
+    companies,
+    contracts,
+    payments,
+    contacts,
+    promises,
+    settings,
+    loading,
+    errors,
+    reload,
+    refresh: reload,
   };
 }
 
