@@ -3,26 +3,28 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
-import { INITIAL_COMPANIES, INITIAL_CONTRACTS } from "@/lib/data-store";
+import { DbStatus } from "@/components/DbStatus";
+import { useDebtData } from "@/lib/use-debt-data";
+import { createContract, updateContract, errorMessage } from "@/lib/db";
 import { Contract } from "@/types/debt";
 import { formatVNDate } from "@/lib/debt-engine";
-import { FileText, Plus, Search, Edit, Calendar, Percent, ShieldAlert } from "lucide-react";
+import { Plus, Search, Edit, Calendar, Percent } from "lucide-react";
 
 export default function ContractsPage() {
-  const [contracts, setContracts] = useState<Contract[]>(INITIAL_CONTRACTS);
-  const [companies] = useState(INITIAL_COMPANIES);
+  const { contracts, companies, loading, errors, reload } = useDebtData(["contracts", "companies"]);
+  const [isSaving, setIsSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingContract, setEditingContract] = useState<Contract | null>(null);
 
   // Form State
-  const [companyId, setCompanyId] = useState(companies[0]?.id || "");
+  const [companyId, setCompanyId] = useState("");
   const [contractNumber, setContractNumber] = useState("");
   const [contractName, setContractName] = useState("");
   const [signedDate, setSignedDate] = useState("2026-08-01");
   const [effectiveDate, setEffectiveDate] = useState("2026-08-01");
   const [paymentTermsDays, setPaymentTermsDays] = useState(90);
-  const [penaltyRateDaily, setPenaltyRateDaily] = useState(0.001); // 0.1%
+  const [penaltyRateDaily, setPenaltyRateDaily] = useState(0.001);
   const [notes, setNotes] = useState("");
 
   const filteredContracts = contracts.filter(
@@ -58,55 +60,38 @@ export default function ContractsPage() {
     setIsModalOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!contractNumber || !contractName || !companyId) {
+    if (!contractNumber.trim() || !contractName.trim() || !companyId) {
       alert("Vui lòng điền đầy đủ thông tin hợp đồng!");
       return;
     }
 
-    const comp = companies.find((x) => x.id === companyId);
+    const input = {
+      company_id: companyId,
+      contract_number: contractNumber,
+      contract_name: contractName,
+      signed_date: signedDate,
+      effective_date: effectiveDate,
+      payment_terms_days: Number(paymentTermsDays),
+      penalty_rate_daily: Number(penaltyRateDaily),
+      notes,
+    };
 
-    if (editingContract) {
-      setContracts((prev) =>
-        prev.map((c) =>
-          c.id === editingContract.id
-            ? {
-                ...c,
-                company_id: companyId,
-                company_name: comp?.name || "",
-                contract_number: contractNumber,
-                contract_name: contractName,
-                signed_date: signedDate,
-                effective_date: effectiveDate,
-                payment_terms_days: Number(paymentTermsDays),
-                penalty_rate_daily: Number(penaltyRateDaily),
-                notes,
-                updated_at: new Date().toISOString(),
-              }
-            : c
-        )
-      );
-    } else {
-      const newContract: Contract = {
-        id: `con-${Date.now()}`,
-        company_id: companyId,
-        company_name: comp?.name || "",
-        contract_number: contractNumber,
-        contract_name: contractName,
-        signed_date: signedDate,
-        effective_date: effectiveDate,
-        payment_terms_days: Number(paymentTermsDays),
-        penalty_rate_daily: Number(penaltyRateDaily),
-        penalty_base_type: "overdue_principal",
-        notes,
-        status: "active",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      setContracts((prev) => [...prev, newContract]);
+    setIsSaving(true);
+    try {
+      if (editingContract) {
+        await updateContract(editingContract.id, input);
+      } else {
+        await createContract(input);
+      }
+      await reload();
+      setIsModalOpen(false);
+    } catch (err) {
+      alert("Không lưu được hợp đồng: " + errorMessage(err));
+    } finally {
+      setIsSaving(false);
     }
-    setIsModalOpen(false);
   };
 
   return (
@@ -117,6 +102,8 @@ export default function ContractsPage() {
         <Header title="Quản lý hợp đồng nguyên tắc" />
 
         <main className="p-6 space-y-6 overflow-y-auto">
+          <DbStatus loading={loading} errors={errors} onRetry={reload} />
+
           {/* Header controls */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
             <div className="relative flex-1 max-w-md">
@@ -140,6 +127,9 @@ export default function ContractsPage() {
 
           {/* Danh sách hợp đồng */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {filteredContracts.length === 0 && !loading && (
+              <p className="text-xs text-slate-400">Chưa có hợp đồng nào.</p>
+            )}
             {filteredContracts.map((contract) => (
               <div
                 key={contract.id}
@@ -173,7 +163,6 @@ export default function ContractsPage() {
                   </div>
                 </div>
 
-                {/* Điều khoản then chốt */}
                 <div className="p-3 bg-slate-50 rounded-lg text-xs space-y-1.5 border border-slate-100">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500 font-medium">Thời hạn thanh toán:</span>
@@ -326,9 +315,10 @@ export default function ContractsPage() {
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700"
+                      disabled={isSaving}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-60"
                     >
-                      {editingContract ? "Lưu thay đổi" : "Tạo hợp đồng"}
+                      {isSaving ? "Đang lưu..." : editingContract ? "Lưu thay đổi" : "Tạo hợp đồng"}
                     </button>
                   </div>
                 </form>

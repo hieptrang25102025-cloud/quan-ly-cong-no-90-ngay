@@ -3,26 +3,25 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
-import { INITIAL_COMPANIES, INITIAL_INVOICES } from "@/lib/data-store";
+import { DbStatus } from "@/components/DbStatus";
+import { useDebtData } from "@/lib/use-debt-data";
+import { createCompany, updateCompany, errorMessage } from "@/lib/db";
 import { Company } from "@/types/debt";
 import { formatVNCurrency } from "@/lib/debt-engine";
 import {
-  Building2,
   Plus,
   Search,
   Phone,
   Mail,
   MapPin,
   Edit,
-  Trash2,
-  Receipt,
   CheckCircle,
   XCircle,
 } from "lucide-react";
 
 export default function CompaniesPage() {
-  const [companies, setCompanies] = useState<Company[]>(INITIAL_COMPANIES);
-  const [invoices] = useState(INITIAL_INVOICES);
+  const { companies, invoices, loading, errors, reload } = useDebtData(["companies", "invoices"]);
+  const [isSaving, setIsSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
@@ -73,52 +72,39 @@ export default function CompaniesPage() {
     setIsModalOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !taxCode) {
+    if (!name.trim() || !taxCode.trim()) {
       alert("Vui lòng nhập tên công ty và mã số thuế!");
       return;
     }
 
-    if (editingCompany) {
-      setCompanies((prev) =>
-        prev.map((c) =>
-          c.id === editingCompany.id
-            ? {
-                ...c,
-                name,
-                tax_code: taxCode,
-                address,
-                contact_person: contactPerson,
-                contact_email: contactEmail,
-                contact_phone: contactPhone,
-                bank_account: bankAccount,
-                bank_name: bankName,
-                notes,
-                updated_at: new Date().toISOString(),
-              }
-            : c
-        )
-      );
-    } else {
-      const newComp: Company = {
-        id: `comp-${Date.now()}`,
-        name,
-        tax_code: taxCode,
-        address,
-        contact_person: contactPerson,
-        contact_email: contactEmail,
-        contact_phone: contactPhone,
-        bank_account: bankAccount,
-        bank_name: bankName,
-        notes,
-        status: "active",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      setCompanies((prev) => [...prev, newComp]);
+    const input = {
+      name,
+      tax_code: taxCode,
+      address,
+      contact_person: contactPerson,
+      contact_email: contactEmail,
+      contact_phone: contactPhone,
+      bank_account: bankAccount,
+      bank_name: bankName,
+      notes,
+    };
+
+    setIsSaving(true);
+    try {
+      if (editingCompany) {
+        await updateCompany(editingCompany.id, input);
+      } else {
+        await createCompany(input);
+      }
+      await reload();
+      setIsModalOpen(false);
+    } catch (err) {
+      alert("Không lưu được công ty: " + errorMessage(err));
+    } finally {
+      setIsSaving(false);
     }
-    setIsModalOpen(false);
   };
 
   return (
@@ -129,6 +115,8 @@ export default function CompaniesPage() {
         <Header title="Quản lý công ty khách hàng" />
 
         <main className="p-6 space-y-6 overflow-y-auto">
+          <DbStatus loading={loading} errors={errors} onRetry={reload} />
+
           {/* Header controls */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
             <div className="relative flex-1 max-w-md">
@@ -379,9 +367,10 @@ export default function CompaniesPage() {
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700"
+                      disabled={isSaving}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-60"
                     >
-                      {editingCompany ? "Lưu thay đổi" : "Thêm mới"}
+                      {isSaving ? "Đang lưu..." : editingCompany ? "Lưu thay đổi" : "Thêm mới"}
                     </button>
                   </div>
                 </form>
