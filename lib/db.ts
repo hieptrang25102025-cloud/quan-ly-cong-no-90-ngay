@@ -1,8 +1,12 @@
-import { supabase } from './supabase';
-import { Invoice, Contract, Customer, Payment } from '@/types/debt';
+import { createClient } from '@supabase/supabase-js';
 
-// --- QUẢN LÝ HÓA ĐƠN & SUPABASE ---
-export async function createInvoice(invoice: Partial<Invoice>) {
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// --- QUẢN LÝ HÓA ĐƠN & DATABASE ---
+export async function createInvoice(invoice: any) {
   const { data, error } = await supabase
     .from('invoices')
     .insert([invoice])
@@ -12,7 +16,7 @@ export async function createInvoice(invoice: Partial<Invoice>) {
   return data;
 }
 
-export async function updateInvoice(id: string, updates: Partial<Invoice>) {
+export async function updateInvoice(id: string, updates: any) {
   const { data, error } = await supabase
     .from('invoices')
     .update(updates)
