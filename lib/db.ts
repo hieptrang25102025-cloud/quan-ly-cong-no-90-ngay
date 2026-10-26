@@ -133,12 +133,12 @@ export async function deletePayment(id: string) {
 
 // ---------- Liên hệ & lịch hẹn ----------
 export async function createContact(input: NewContactInput) {
-  const { data, error } = await supabase.from("contact_history").insert([contactToRow(input)]).select().single();
+  const { data, error } = await supabase.from("contact_histories").insert([contactToRow(input)]).select().single();
   if (error) throw error;
   return data;
 }
 export async function deleteContact(id: string) {
-  const { error } = await supabase.from("contact_history").delete().eq("id", id);
+  const { error } = await supabase.from("contact_histories").delete().eq("id", id);
   if (error) throw error;
 }
 export async function createPromise(input: NewPromiseInput) {

@@ -60,7 +60,7 @@ export function useDebtData(tables?: string[]) {
         run("contracts", "contracts", SELECT_CONTRACTS, (r) => setContracts(r.map(toContract))),
         run("invoices", "invoices", SELECT_INVOICES, (r) => setInvoices(r.map((x) => toFreshInvoice(x)))),
         run("payments", "payments", SELECT_PAYMENTS, (r) => setPayments(r.map(toPayment))),
-        run("contacts", "contact_history", SELECT_CONTACTS, (r) => setContacts(r.map(toContact))),
+        run("contacts", "contact_histories", SELECT_CONTACTS, (r) => setContacts(r.map(toContact))),
         run("promises", "payment_promises", SELECT_PROMISES, (r) => setPromises(r.map(toPromise))),
         run("settings", "app_settings", SELECT_SETTINGS, (r) => setSettings(r[0] ? toSettings(r[0]) : null)),
       ]);
